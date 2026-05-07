@@ -1,82 +1,58 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import { LapTable } from './components/LapTable'
 import { MetricCard } from './components/MetricCard'
 import {
+  clearRaceData,
+  deleteMostRecentLap,
+  ensureActiveRace,
+  fetchActiveRace,
+  fetchRaceLaps,
+  finishRace,
+  logLap,
+  pauseRace,
+  resetRace,
+  resumeRace,
+  startRace,
+  updateRaceDuration,
+} from './lib/raceSync'
+import { isSupabaseConfigured, supabase } from './lib/supabase'
+import {
   DEFAULT_RACE_MINUTES,
   MAX_RACE_MINUTES,
   MIN_RACE_MINUTES,
-  clampDurationMinutes,
-  createInitialRaceState,
   formatAverage,
   formatClock,
   formatLapTime,
   formatSignedGain,
-  getElapsedMs,
-  getRemainingMs,
-  minutesToMs,
+  getDurationMinutes,
+  getRaceDurationMs,
+  getRaceElapsedMs,
+  getRaceRemainingMs,
+  secondsToMs,
 } from './lib/time'
-import type { Lap, RaceState, RaceStatus } from './types'
+import type { LapRow, RaceRow } from './types'
 
-const STORAGE_KEY = 'baja-race-dashboard-state'
+type SyncStatus = 'disabled' | 'connecting' | 'connected' | 'error'
+
 const TICK_MS = 250
 
-function isRaceStatus(value: unknown): value is RaceStatus {
-  return value === 'ready' || value === 'running' || value === 'paused'
-}
-
-function isLap(value: unknown): value is Lap {
-  if (typeof value !== 'object' || value === null) {
-    return false
-  }
-
-  const lap = value as Partial<Lap>
-
-  return (
-    typeof lap.id === 'string' &&
-    typeof lap.number === 'number' &&
-    typeof lap.loggedAt === 'number' &&
-    typeof lap.raceElapsedMs === 'number' &&
-    typeof lap.lapDurationMs === 'number' &&
-    typeof lap.remainingMs === 'number'
-  )
-}
-
-function loadRaceState(): RaceState {
-  const fallback = createInitialRaceState()
-  const stored = window.localStorage.getItem(STORAGE_KEY)
-
-  if (!stored) {
-    return fallback
-  }
-
-  try {
-    const parsed = JSON.parse(stored) as Partial<RaceState>
-    const durationMinutes = clampDurationMinutes(parsed.durationMinutes ?? DEFAULT_RACE_MINUTES)
-    const status = isRaceStatus(parsed.status) ? parsed.status : 'ready'
-    const laps = Array.isArray(parsed.laps) ? parsed.laps.filter(isLap) : []
-    const durationMs = minutesToMs(durationMinutes)
-    const elapsedBeforeRunMs =
-      typeof parsed.elapsedBeforeRunMs === 'number'
-        ? Math.min(durationMs, Math.max(0, parsed.elapsedBeforeRunMs))
-        : 0
-
-    return {
-      durationMinutes,
-      durationMs,
-      status,
-      startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : null,
-      elapsedBeforeRunMs,
-      laps,
-    }
-  } catch {
-    return fallback
-  }
-}
-
 function App() {
-  const [raceState, setRaceState] = useState<RaceState>(loadRaceState)
+  const [race, setRace] = useState<RaceRow | null>(null)
+  const [laps, setLaps] = useState<LapRow[]>([])
   const [now, setNow] = useState(() => Date.now())
+  const [isLoading, setIsLoading] = useState(true)
+  const [isMutating, setIsMutating] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(
+    isSupabaseConfigured ? 'connecting' : 'disabled',
+  )
+  const [syncWarning, setSyncWarning] = useState<string | null>(
+    isSupabaseConfigured
+      ? null
+      : 'Supabase environment variables are missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.',
+  )
+  const finishRequestedRaceId = useRef<string | null>(null)
+  const raceId = race?.id ?? null
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), TICK_MS)
@@ -84,26 +60,97 @@ function App() {
     return () => window.clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(raceState))
-  }, [raceState])
+  const reportSupabaseError = useCallback((context: string, error: unknown) => {
+    console.error(`[Supabase] ${context}`, error)
+    setSyncStatus((current) => (current === 'disabled' ? current : 'error'))
+    setSyncWarning(`${context}. Live sync may be unavailable until Supabase reconnects.`)
+  }, [])
 
-  const elapsedMs = getElapsedMs(raceState, now)
-  const remainingMs = getRemainingMs(raceState, now)
-
-  useEffect(() => {
-    if (raceState.status === 'running' && remainingMs === 0) {
-      setRaceState((current) => ({
-        ...current,
-        status: 'paused',
-        startedAt: null,
-        elapsedBeforeRunMs: current.durationMs,
-      }))
+  const refreshRaceData = useCallback(async () => {
+    if (!isSupabaseConfigured) {
+      setIsLoading(false)
+      return
     }
-  }, [raceState.status, remainingMs])
 
-  const completedLaps = raceState.laps.length
-  const totalLapMs = raceState.laps.reduce((sum, lap) => sum + lap.lapDurationMs, 0)
+    try {
+      const activeRace = await ensureActiveRace()
+      const activeLaps = await fetchRaceLaps(activeRace.id)
+      setRace(activeRace)
+      setLaps(activeLaps)
+      setSyncWarning(null)
+    } catch (error) {
+      reportSupabaseError('Unable to load the active race', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [reportSupabaseError])
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void refreshRaceData()
+    })
+  }, [refreshRaceData])
+
+  useEffect(() => {
+    if (!supabase || !raceId) {
+      return undefined
+    }
+
+    queueMicrotask(() => setSyncStatus('connecting'))
+    const realtimeClient = supabase
+
+    const refreshLaps = async () => {
+      try {
+        setLaps(await fetchRaceLaps(raceId))
+      } catch (error) {
+        reportSupabaseError('Unable to refresh laps from realtime change', error)
+      }
+    }
+
+    const channel = realtimeClient
+      .channel(`active-race-${raceId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'races', filter: `id=eq.${raceId}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            void refreshRaceData()
+            return
+          }
+
+          setRace(payload.new as RaceRow)
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'laps', filter: `race_id=eq.${raceId}` },
+        () => {
+          void refreshLaps()
+        },
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setSyncStatus('connected')
+          setSyncWarning(null)
+          return
+        }
+
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setSyncStatus('error')
+          setSyncWarning('Supabase Realtime is not connected. The dashboard will retry when data changes.')
+        }
+      })
+
+    return () => {
+      void realtimeClient.removeChannel(channel)
+    }
+  }, [raceId, refreshRaceData, reportSupabaseError])
+
+  const elapsedMs = getRaceElapsedMs(race, now)
+  const remainingMs = getRaceRemainingMs(race, now)
+  const raceDurationMs = getRaceDurationMs(race)
+  const completedLaps = laps.length
+  const totalLapMs = laps.reduce((sum, lap) => sum + secondsToMs(lap.lap_duration_seconds), 0)
   const averageLapMs = completedLaps > 0 ? totalLapMs / completedLaps : null
   const estimatedRemainingLaps =
     averageLapMs !== null && averageLapMs > 0 ? Math.floor(remainingMs / averageLapMs) : null
@@ -115,100 +162,120 @@ function App() {
     oneMoreLapTarget !== null && oneMoreLapTarget > 0 ? remainingMs / oneMoreLapTarget : null
   const requiredGainMs =
     averageLapMs !== null && requiredLapMs !== null ? Math.max(0, averageLapMs - requiredLapMs) : null
-  const canEditDuration = raceState.status === 'ready' && completedLaps === 0 && elapsedMs === 0
-  const raceComplete = remainingMs === 0
+  const raceComplete = race?.status === 'finished' || remainingMs === 0
+  const controlDisabled = !race || !isSupabaseConfigured || isLoading || isMutating
+  const canEditDuration = Boolean(race?.status === 'not_started' && completedLaps === 0 && !controlDisabled)
+  const raceStatusClass = race?.status ?? 'not_started'
+  const raceStatusLabel = raceComplete ? 'Race complete' : race?.status.replace('_', ' ') ?? 'offline'
+  const durationMinutes = race ? getDurationMinutes(race.duration_seconds) : DEFAULT_RACE_MINUTES
+  const syncStatusLabel =
+    syncStatus === 'connected'
+      ? 'Live sync'
+      : syncStatus === 'connecting'
+        ? 'Connecting'
+        : syncStatus === 'disabled'
+          ? 'Sync disabled'
+          : 'Sync issue'
+
+  useEffect(() => {
+    if (!race || race.status !== 'running') {
+      finishRequestedRaceId.current = null
+      return
+    }
+
+    if (remainingMs > 0 || finishRequestedRaceId.current === race.id) {
+      return
+    }
+
+    finishRequestedRaceId.current = race.id
+    finishRace(race.id).catch((error: unknown) => {
+      finishRequestedRaceId.current = null
+      reportSupabaseError('Unable to mark the race finished', error)
+    })
+  }, [race, remainingMs, reportSupabaseError])
+
+  async function runMutation(label: string, mutation: () => Promise<void>) {
+    if (!race || !isSupabaseConfigured) {
+      return
+    }
+
+    setIsMutating(true)
+
+    try {
+      await mutation()
+      const [updatedRace, updatedLaps] = await Promise.all([fetchActiveRace(), fetchRaceLaps(race.id)])
+      setRace(updatedRace)
+      setLaps(updatedLaps)
+      setSyncWarning(null)
+    } catch (error) {
+      reportSupabaseError(label, error)
+    } finally {
+      setIsMutating(false)
+    }
+  }
 
   function handleDurationChange(value: string) {
-    const durationMinutes = clampDurationMinutes(Number(value))
+    void runMutation('Unable to update race duration', async () => {
+      if (!race) {
+        return
+      }
 
-    setRaceState((current) => ({
-      ...current,
-      durationMinutes,
-      durationMs: minutesToMs(durationMinutes),
-      elapsedBeforeRunMs: 0,
-      startedAt: null,
-    }))
+      await updateRaceDuration(race.id, Number(value))
+    })
   }
 
   function handleStart() {
-    const timestamp = Date.now()
-
-    setRaceState((current) => ({
-      ...current,
-      status: 'running',
-      startedAt: timestamp,
-      elapsedBeforeRunMs: 0,
-      laps: [],
-    }))
-    setNow(timestamp)
+    void runMutation('Unable to start race', async () => {
+      if (race) {
+        await startRace(race.id, new Date())
+      }
+    })
   }
 
   function handlePause() {
-    const timestamp = Date.now()
-
-    setRaceState((current) => ({
-      ...current,
-      status: 'paused',
-      startedAt: null,
-      elapsedBeforeRunMs: getElapsedMs(current, timestamp),
-    }))
-    setNow(timestamp)
+    void runMutation('Unable to pause race', async () => {
+      if (race) {
+        await pauseRace(race.id, new Date())
+      }
+    })
   }
 
   function handleResume() {
-    const timestamp = Date.now()
-
-    setRaceState((current) => ({
-      ...current,
-      status: 'running',
-      startedAt: timestamp,
-    }))
-    setNow(timestamp)
+    void runMutation('Unable to resume race', async () => {
+      if (race) {
+        await resumeRace(race, new Date())
+      }
+    })
   }
 
   function handleReset() {
-    setRaceState((current) => createInitialRaceState(current.durationMinutes))
-    setNow(Date.now())
+    void runMutation('Unable to reset race', async () => {
+      if (race) {
+        await resetRace(race)
+      }
+    })
   }
 
   function handleClearRaceData() {
-    window.localStorage.removeItem(STORAGE_KEY)
-    setRaceState(createInitialRaceState())
-    setNow(Date.now())
+    void runMutation('Unable to clear race data', async () => {
+      if (race) {
+        await clearRaceData(race)
+      }
+    })
   }
 
   function handleLogLap() {
-    const timestamp = Date.now()
-
-    setRaceState((current) => {
-      const raceElapsedMs = getElapsedMs(current, timestamp)
-      const previousLapElapsedMs = current.laps.at(-1)?.raceElapsedMs ?? 0
-      const remainingAtLapMs = Math.max(0, current.durationMs - raceElapsedMs)
-      const lapNumber = current.laps.length + 1
-
-      return {
-        ...current,
-        laps: [
-          ...current.laps,
-          {
-            id: `${timestamp}-${lapNumber}`,
-            number: lapNumber,
-            loggedAt: timestamp,
-            raceElapsedMs,
-            lapDurationMs: Math.max(0, raceElapsedMs - previousLapElapsedMs),
-            remainingMs: remainingAtLapMs,
-          },
-        ],
+    void runMutation('Unable to log lap', async () => {
+      if (race) {
+        await logLap(race, laps, new Date())
       }
     })
-    setNow(timestamp)
   }
 
   function handleDeleteRecentLap() {
-    setRaceState((current) => ({
-      ...current,
-      laps: current.laps.slice(0, -1),
-    }))
+    void runMutation('Unable to delete the most recent lap', async () => {
+      await deleteMostRecentLap(laps)
+    })
   }
 
   return (
@@ -218,11 +285,19 @@ function App() {
           <p className="eyebrow">Student endurance command</p>
           <h1>Baja Race Dashboard</h1>
         </div>
-        <div className={`race-status race-status--${raceState.status}`}>
-          <span></span>
-          {raceComplete ? 'Race complete' : raceState.status}
+        <div className="status-stack">
+          <div className={`race-status race-status--${raceStatusClass}`}>
+            <span></span>
+            {raceStatusLabel}
+          </div>
+          <div className={`sync-status sync-status--${syncStatus}`}>
+            <span></span>
+            {syncStatusLabel}
+          </div>
         </div>
       </header>
+
+      {syncWarning ? <div className="sync-warning">{syncWarning}</div> : null}
 
       <section className="timer-panel">
         <div className="timer-panel__main">
@@ -240,46 +315,46 @@ function App() {
                 min={MIN_RACE_MINUTES}
                 onChange={(event) => handleDurationChange(event.target.value)}
                 type="number"
-                value={raceState.durationMinutes}
+                value={durationMinutes}
               />
               <span>min</span>
             </label>
           </div>
 
           <div className="master-clock" aria-live="polite">
-            {formatClock(remainingMs)}
+            {isLoading ? '0:00:00' : formatClock(remainingMs)}
           </div>
           <div className="timer-subline">
             <span>Elapsed {formatClock(elapsedMs)}</span>
-            <span>Race length {formatClock(raceState.durationMs)}</span>
+            <span>Race length {formatClock(raceDurationMs)}</span>
           </div>
         </div>
 
         <div className="control-grid">
-          <button disabled={raceState.status !== 'ready'} onClick={handleStart} type="button">
+          <button disabled={controlDisabled || race?.status !== 'not_started'} onClick={handleStart} type="button">
             Start
           </button>
-          <button disabled={raceState.status !== 'running'} onClick={handlePause} type="button">
+          <button disabled={controlDisabled || race?.status !== 'running'} onClick={handlePause} type="button">
             Pause
           </button>
-          <button disabled={raceState.status !== 'paused' || raceComplete} onClick={handleResume} type="button">
+          <button disabled={controlDisabled || race?.status !== 'paused' || raceComplete} onClick={handleResume} type="button">
             Resume
           </button>
-          <button onClick={handleReset} type="button">
+          <button disabled={controlDisabled} onClick={handleReset} type="button">
             Reset
           </button>
           <button
             className="button-primary"
-            disabled={raceState.status !== 'running' || raceComplete}
+            disabled={controlDisabled || race?.status !== 'running' || raceComplete}
             onClick={handleLogLap}
             type="button"
           >
             Log Lap
           </button>
-          <button disabled={completedLaps === 0} onClick={handleDeleteRecentLap} type="button">
+          <button disabled={controlDisabled || completedLaps === 0} onClick={handleDeleteRecentLap} type="button">
             Delete Recent Lap
           </button>
-          <button className="button-danger" onClick={handleClearRaceData} type="button">
+          <button className="button-danger" disabled={controlDisabled} onClick={handleClearRaceData} type="button">
             Clear Race Data
           </button>
         </div>
@@ -287,7 +362,7 @@ function App() {
 
       <section className="metrics-grid" aria-label="Race projections">
         <MetricCard
-          detail="Completed laps logged by the pit crew"
+          detail="Completed laps saved to the shared race"
           title="Completed Laps"
           value={completedLaps}
         />
@@ -319,7 +394,7 @@ function App() {
         />
       </section>
 
-      <LapTable laps={raceState.laps} />
+      <LapTable laps={laps} race={race} />
     </main>
   )
 }

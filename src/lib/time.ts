@@ -1,14 +1,21 @@
-import type { RaceState } from '../types'
+import type { RaceRow } from '../types'
 
 export const DEFAULT_RACE_MINUTES = 240
 export const MIN_RACE_MINUTES = 1
 export const MAX_RACE_MINUTES = 720
 
 const MS_PER_SECOND = 1000
-const MS_PER_MINUTE = 60 * MS_PER_SECOND
 
-export function minutesToMs(minutes: number) {
-  return minutes * MS_PER_MINUTE
+export function minutesToSeconds(minutes: number) {
+  return minutes * 60
+}
+
+export function secondsToMs(seconds: number) {
+  return seconds * MS_PER_SECOND
+}
+
+export function msToSeconds(ms: number) {
+  return ms / MS_PER_SECOND
 }
 
 export function clampDurationMinutes(minutes: number) {
@@ -19,30 +26,34 @@ export function clampDurationMinutes(minutes: number) {
   return Math.min(MAX_RACE_MINUTES, Math.max(MIN_RACE_MINUTES, Math.round(minutes)))
 }
 
-export function createInitialRaceState(minutes = DEFAULT_RACE_MINUTES): RaceState {
-  const durationMinutes = clampDurationMinutes(minutes)
+export function getDurationMinutes(durationSeconds: number) {
+  return Math.round(durationSeconds / 60)
+}
 
-  return {
-    durationMinutes,
-    durationMs: minutesToMs(durationMinutes),
-    status: 'ready',
-    startedAt: null,
-    elapsedBeforeRunMs: 0,
-    laps: [],
+export function getRaceDurationMs(race: RaceRow | null) {
+  return race ? secondsToMs(race.duration_seconds) : secondsToMs(minutesToSeconds(DEFAULT_RACE_MINUTES))
+}
+
+export function getRaceElapsedMs(race: RaceRow | null, now: number) {
+  if (!race || race.status === 'not_started' || !race.started_at) {
+    return 0
   }
+
+  if (race.status === 'finished') {
+    return getRaceDurationMs(race)
+  }
+
+  const startedAtMs = new Date(race.started_at).getTime()
+  const pausedAtMs = race.paused_at ? new Date(race.paused_at).getTime() : null
+  const comparisonMs = race.status === 'paused' && pausedAtMs !== null ? pausedAtMs : now
+  const pausedMs = secondsToMs(race.total_paused_seconds)
+  const elapsed = comparisonMs - startedAtMs - pausedMs
+
+  return Math.min(getRaceDurationMs(race), Math.max(0, elapsed))
 }
 
-export function getElapsedMs(state: RaceState, now: number) {
-  const elapsed =
-    state.status === 'running' && state.startedAt !== null
-      ? state.elapsedBeforeRunMs + now - state.startedAt
-      : state.elapsedBeforeRunMs
-
-  return Math.min(state.durationMs, Math.max(0, elapsed))
-}
-
-export function getRemainingMs(state: RaceState, now: number) {
-  return Math.max(0, state.durationMs - getElapsedMs(state, now))
+export function getRaceRemainingMs(race: RaceRow | null, now: number) {
+  return Math.max(0, getRaceDurationMs(race) - getRaceElapsedMs(race, now))
 }
 
 export function formatClock(ms: number) {

@@ -62,9 +62,69 @@
   color: var(--amber);
 }
 
-.race-status--ready span {
+.race-status--not_started span {
   background: var(--blue);
   color: var(--blue);
+}
+
+.race-status--finished span {
+  background: var(--red);
+  color: var(--red);
+}
+
+.status-stack {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sync-status {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 0.76rem;
+  font-weight: 800;
+  gap: 8px;
+  padding: 7px 11px;
+  text-transform: uppercase;
+}
+
+.sync-status span {
+  background: var(--muted);
+  border-radius: 999px;
+  height: 8px;
+  width: 8px;
+}
+
+.sync-status--connected span {
+  background: var(--green);
+  box-shadow: 0 0 14px rgba(58, 214, 161, 0.75);
+}
+
+.sync-status--connecting span {
+  background: var(--amber);
+}
+
+.sync-status--disabled span,
+.sync-status--error span {
+  background: var(--red);
+}
+
+.sync-warning {
+  background: rgba(255, 190, 87, 0.1);
+  border: 1px solid rgba(255, 190, 87, 0.32);
+  border-radius: 8px;
+  color: #ffd99d;
+  font-size: 0.94rem;
+  font-weight: 750;
+  line-height: 1.4;
+  margin: 0 auto 18px;
+  max-width: 1440px;
+  padding: 12px 14px;
 }
 
 .timer-panel,
@@ -405,6 +465,14 @@ button:disabled {
   }
 
   .race-status {
+    justify-content: center;
+  }
+
+  .status-stack {
+    align-items: stretch;
+  }
+
+  .sync-status {
     justify-content: center;
   }
 

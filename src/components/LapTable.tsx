@@ -1,12 +1,14 @@
-import type { Lap } from '../types'
-import { formatClock, formatLapTime } from '../lib/time'
+import type { LapRow, RaceRow } from '../types'
+import { formatClock, formatLapTime, getRaceDurationMs, secondsToMs } from '../lib/time'
 
 type LapTableProps = {
-  laps: Lap[]
+  laps: LapRow[]
+  race: RaceRow | null
 }
 
-export function LapTable({ laps }: LapTableProps) {
+export function LapTable({ laps, race }: LapTableProps) {
   const orderedLaps = [...laps].reverse()
+  const raceDurationMs = getRaceDurationMs(race)
 
   return (
     <section className="lap-panel">
@@ -32,10 +34,10 @@ export function LapTable({ laps }: LapTableProps) {
             {orderedLaps.length > 0 ? (
               orderedLaps.map((lap) => (
                 <tr key={lap.id}>
-                  <td>#{lap.number}</td>
-                  <td>{formatLapTime(lap.lapDurationMs)}</td>
-                  <td>{formatClock(lap.remainingMs)}</td>
-                  <td>{new Date(lap.loggedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                  <td>#{lap.lap_number}</td>
+                  <td>{formatLapTime(secondsToMs(lap.lap_duration_seconds))}</td>
+                  <td>{formatClock(Math.max(0, raceDurationMs - secondsToMs(lap.race_elapsed_seconds)))}</td>
+                  <td>{new Date(lap.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                 </tr>
               ))
             ) : (
