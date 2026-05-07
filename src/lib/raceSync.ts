@@ -6,11 +6,34 @@ import {
   minutesToSeconds,
   msToSeconds,
 } from './time'
-import type { LapRow, RaceRow } from '../types'
+import type {
+  DriverRow,
+  IssueLogRow,
+  IssueSeverity,
+  LapRow,
+  RaceRow,
+  StintRow,
+  StopEventRow,
+  StopEventType,
+  TeamStatus,
+  TeamStatusEventRow,
+  TrackedTeamRow,
+} from '../types'
 
 export const ACTIVE_RACE_ID = '00000000-0000-0000-0000-000000000001'
 
 const DEFAULT_RACE_NAME = 'Active Endurance Race'
+
+export type RaceData = {
+  race: RaceRow
+  laps: LapRow[]
+  stopEvents: StopEventRow[]
+  drivers: DriverRow[]
+  stints: StintRow[]
+  issues: IssueLogRow[]
+  trackedTeams: TrackedTeamRow[]
+  teamStatusEvents: TeamStatusEventRow[]
+}
 
 function requireSupabase() {
   if (!supabase) {
@@ -80,12 +103,146 @@ export async function fetchRaceLaps(raceId: string) {
   return data
 }
 
+export async function fetchStopEvents(raceId: string) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('stop_events')
+    .select('*')
+    .eq('race_id', raceId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export async function fetchDrivers(raceId: string) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('drivers')
+    .select('*')
+    .eq('race_id', raceId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export async function fetchStints(raceId: string) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('stints')
+    .select('*')
+    .eq('race_id', raceId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export async function fetchIssueLogs(raceId: string) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('issue_logs')
+    .select('*')
+    .eq('race_id', raceId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export async function fetchTrackedTeams(raceId: string) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('tracked_teams')
+    .select('*')
+    .eq('race_id', raceId)
+    .order('car_number', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export async function fetchTeamStatusEvents(raceId: string) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('team_status_events')
+    .select('*')
+    .eq('race_id', raceId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export async function fetchRaceData(): Promise<RaceData> {
+  const race = await ensureActiveRace()
+  const [
+    laps,
+    stopEvents,
+    drivers,
+    stints,
+    issues,
+    trackedTeams,
+    teamStatusEvents,
+  ] = await Promise.all([
+    fetchRaceLaps(race.id),
+    fetchStopEvents(race.id),
+    fetchDrivers(race.id),
+    fetchStints(race.id),
+    fetchIssueLogs(race.id),
+    fetchTrackedTeams(race.id),
+    fetchTeamStatusEvents(race.id),
+  ])
+
+  return {
+    race,
+    laps,
+    stopEvents,
+    drivers,
+    stints,
+    issues,
+    trackedTeams,
+    teamStatusEvents,
+  }
+}
+
 export async function updateRaceDuration(raceId: string, minutes: number) {
   const client = requireSupabase()
   const durationMinutes = clampDurationMinutes(minutes)
   const { error } = await client
     .from('races')
     .update({ duration_seconds: minutesToSeconds(durationMinutes) })
+    .eq('id', raceId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function updateTargetLapSeconds(raceId: string, targetSeconds: number | null) {
+  const client = requireSupabase()
+  const { error } = await client
+    .from('races')
+    .update({ target_lap_seconds: targetSeconds && targetSeconds > 0 ? targetSeconds : null })
     .eq('id', raceId)
 
   if (error) {
@@ -159,18 +316,27 @@ export async function finishRace(raceId: string) {
   }
 }
 
+async function deleteRaceRows(raceId: string, tables: string[]) {
+  const client = requireSupabase()
+
+  for (const table of tables) {
+    const { error } = await client.from(table).delete().eq('race_id', raceId)
+
+    if (error) {
+      throw error
+    }
+  }
+}
+
 export async function resetRace(race: RaceRow) {
   const client = requireSupabase()
-  const { error: deleteError } = await client.from('laps').delete().eq('race_id', race.id)
+  await deleteRaceRows(race.id, ['laps', 'stop_events', 'stints'])
 
-  if (deleteError) {
-    throw deleteError
-  }
-
-  const { error: updateError } = await client
+  const { error } = await client
     .from('races')
     .update({
       duration_seconds: race.duration_seconds,
+      target_lap_seconds: race.target_lap_seconds,
       started_at: null,
       status: 'not_started',
       paused_at: null,
@@ -178,23 +344,28 @@ export async function resetRace(race: RaceRow) {
     })
     .eq('id', race.id)
 
-  if (updateError) {
-    throw updateError
+  if (error) {
+    throw error
   }
 }
 
 export async function clearRaceData(race: RaceRow) {
   const client = requireSupabase()
-  const { error: deleteError } = await client.from('laps').delete().eq('race_id', race.id)
+  await deleteRaceRows(race.id, [
+    'laps',
+    'stop_events',
+    'stints',
+    'drivers',
+    'issue_logs',
+    'tracked_teams',
+    'team_status_events',
+  ])
 
-  if (deleteError) {
-    throw deleteError
-  }
-
-  const { error: updateError } = await client
+  const { error } = await client
     .from('races')
     .update({
       duration_seconds: minutesToSeconds(DEFAULT_RACE_MINUTES),
+      target_lap_seconds: null,
       started_at: null,
       status: 'not_started',
       paused_at: null,
@@ -202,8 +373,8 @@ export async function clearRaceData(race: RaceRow) {
     })
     .eq('id', race.id)
 
-  if (updateError) {
-    throw updateError
+  if (error) {
+    throw error
   }
 }
 
@@ -237,6 +408,191 @@ export async function deleteMostRecentLap(laps: LapRow[]) {
 
   const client = requireSupabase()
   const { error } = await client.from('laps').delete().eq('id', mostRecentLap.id)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function addStopEvent(
+  race: RaceRow,
+  eventType: StopEventType,
+  note: string,
+  timestamp: Date,
+) {
+  const client = requireSupabase()
+  const { error } = await client.from('stop_events').insert({
+    race_id: race.id,
+    event_type: eventType,
+    race_elapsed_seconds: msToSeconds(getRaceElapsedMs(race, timestamp.getTime())),
+    note: note.trim() || null,
+    created_at: timestamp.toISOString(),
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function deleteMostRecentStopEvent(stopEvents: StopEventRow[]) {
+  const mostRecentEvent = stopEvents.at(-1)
+
+  if (!mostRecentEvent) {
+    return
+  }
+
+  const client = requireSupabase()
+  const { error } = await client.from('stop_events').delete().eq('id', mostRecentEvent.id)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function addDriver(raceId: string, name: string) {
+  const trimmedName = name.trim()
+
+  if (!trimmedName) {
+    return
+  }
+
+  const client = requireSupabase()
+  const { error } = await client.from('drivers').insert({
+    race_id: raceId,
+    name: trimmedName,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+async function endOpenStint(race: RaceRow, stints: StintRow[], laps: LapRow[], timestamp: Date) {
+  const openStint = stints.find((stint) => stint.end_elapsed_seconds === null)
+
+  if (!openStint) {
+    return
+  }
+
+  const client = requireSupabase()
+  const { error } = await client
+    .from('stints')
+    .update({
+      end_elapsed_seconds: msToSeconds(getRaceElapsedMs(race, timestamp.getTime())),
+      end_lap_number: laps.length,
+      ended_at: timestamp.toISOString(),
+    })
+    .eq('id', openStint.id)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function startDriverStint(
+  race: RaceRow,
+  stints: StintRow[],
+  laps: LapRow[],
+  driverId: string,
+  timestamp: Date,
+) {
+  const client = requireSupabase()
+  await endOpenStint(race, stints, laps, timestamp)
+
+  const { error } = await client.from('stints').insert({
+    race_id: race.id,
+    driver_id: driverId,
+    start_elapsed_seconds: msToSeconds(getRaceElapsedMs(race, timestamp.getTime())),
+    start_lap_number: laps.length,
+    created_at: timestamp.toISOString(),
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function endCurrentStint(race: RaceRow, stints: StintRow[], laps: LapRow[], timestamp: Date) {
+  await endOpenStint(race, stints, laps, timestamp)
+}
+
+export async function addIssue(raceId: string, severity: IssueSeverity, message: string) {
+  const trimmedMessage = message.trim()
+
+  if (!trimmedMessage) {
+    return
+  }
+
+  const client = requireSupabase()
+  const { error } = await client.from('issue_logs').insert({
+    race_id: raceId,
+    severity,
+    message: trimmedMessage,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function resolveIssue(issueId: string) {
+  const client = requireSupabase()
+  const { error } = await client
+    .from('issue_logs')
+    .update({
+      resolved: true,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq('id', issueId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function addTrackedTeam(raceId: string, schoolName: string, carNumber: string, notes: string) {
+  const trimmedSchoolName = schoolName.trim()
+  const trimmedCarNumber = carNumber.trim()
+
+  if (!trimmedSchoolName || !trimmedCarNumber) {
+    return
+  }
+
+  const client = requireSupabase()
+  const { data: team, error: teamError } = await client
+    .from('tracked_teams')
+    .insert({
+      race_id: raceId,
+      school_name: trimmedSchoolName,
+      car_number: trimmedCarNumber,
+      notes: notes.trim() || null,
+    })
+    .select()
+    .single()
+
+  if (teamError) {
+    throw teamError
+  }
+
+  const { error: statusError } = await client.from('team_status_events').insert({
+    race_id: raceId,
+    team_id: team.id,
+    status: 'unknown',
+  })
+
+  if (statusError) {
+    throw statusError
+  }
+}
+
+export async function updateTeamStatus(raceId: string, teamId: string, status: TeamStatus, note: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('team_status_events').insert({
+    race_id: raceId,
+    team_id: teamId,
+    status,
+    note: note.trim() || null,
+  })
 
   if (error) {
     throw error

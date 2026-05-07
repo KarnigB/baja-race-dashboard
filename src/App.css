@@ -295,6 +295,18 @@ button:disabled {
   max-width: 1440px;
 }
 
+.priority-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.priority-grid .metric-card__value {
+  font-size: 2.35rem;
+}
+
+.priority-grid .metric-card--warning .metric-card__value {
+  font-size: 1.6rem;
+}
+
 .metric-card {
   min-height: 164px;
   padding: 18px;
@@ -350,6 +362,271 @@ button:disabled {
   max-width: 1440px;
   overflow: hidden;
   padding: 20px;
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 auto 18px;
+  max-width: 1440px;
+}
+
+.dashboard-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  min-width: 0;
+  padding: 18px;
+}
+
+.lap-strategy,
+.driver-panel,
+.traffic-panel {
+  grid-column: span 2;
+}
+
+.target-form,
+.inline-form,
+.issue-form,
+.team-form,
+.driver-controls,
+.stop-controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.target-form {
+  align-items: end;
+  grid-template-columns: repeat(2, minmax(110px, 160px)) minmax(140px, 190px);
+}
+
+.inline-form,
+.issue-form {
+  grid-template-columns: minmax(0, 1fr) 160px;
+}
+
+.issue-form {
+  grid-template-columns: 130px minmax(0, 1fr) 150px;
+}
+
+.team-form {
+  grid-template-columns: 100px minmax(0, 1fr) minmax(0, 1fr) 140px;
+}
+
+.driver-controls {
+  grid-template-columns: minmax(0, 1fr) 150px 150px;
+}
+
+.stop-controls {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+label,
+.wide-label {
+  color: var(--muted);
+  display: grid;
+  font-size: 0.74rem;
+  font-weight: 900;
+  gap: 6px;
+  text-transform: uppercase;
+}
+
+input,
+select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-strong);
+  font: inherit;
+  min-height: 44px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.wide-label {
+  margin-top: 10px;
+}
+
+.compact-stats,
+.traffic-counts {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.compact-stats div,
+.traffic-counts span,
+.recommendation {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.compact-stats span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.compact-stats strong {
+  color: var(--text-strong);
+  display: block;
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.25;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+
+.danger-banner {
+  background: rgba(255, 91, 91, 0.14);
+  border: 1px solid rgba(255, 91, 91, 0.42);
+  border-radius: 6px;
+  color: #ffb6b6;
+  font-weight: 900;
+  margin-top: 14px;
+  padding: 10px;
+  text-transform: uppercase;
+}
+
+.recommendation {
+  color: var(--text-strong);
+  font-size: 1.35rem;
+  font-weight: 950;
+  margin-top: 14px;
+  text-transform: uppercase;
+}
+
+.recommendation--good {
+  border-color: rgba(58, 214, 161, 0.42);
+  color: var(--green);
+}
+
+.recommendation--warn {
+  border-color: rgba(255, 190, 87, 0.42);
+  color: var(--amber);
+}
+
+.traffic-counts {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.traffic-counts span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 900;
+  text-align: center;
+}
+
+.team-list,
+.issue-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.team-row,
+.issue-row {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(180px, 280px) minmax(0, 1fr);
+  padding: 10px;
+}
+
+.team-row strong,
+.issue-row strong {
+  color: var(--text-strong);
+  display: block;
+  line-height: 1.25;
+}
+
+.team-row span,
+.issue-row span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 750;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+.team-actions {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.team-actions button {
+  font-size: 0.72rem;
+  min-height: 38px;
+  padding: 7px 6px;
+}
+
+button.is-active {
+  border-color: rgba(58, 214, 161, 0.5);
+  color: var(--green);
+}
+
+.issue-row {
+  grid-template-columns: minmax(0, 1fr) 120px;
+}
+
+.issue-row--watch {
+  border-color: rgba(255, 190, 87, 0.34);
+}
+
+.issue-row--critical {
+  border-color: rgba(255, 91, 91, 0.42);
+}
+
+.issue-row.is-resolved {
+  opacity: 0.55;
+}
+
+.mini-table-wrap {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.mini-table {
+  border-collapse: collapse;
+  min-width: 620px;
+  width: 100%;
+}
+
+.mini-table th,
+.mini-table td {
+  border-bottom: 1px solid var(--border);
+  color: var(--text-strong);
+  padding: 10px;
+  text-align: left;
+}
+
+.mini-table th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.mini-table td {
+  font-family: var(--mono);
+}
+
+.empty-text {
+  color: var(--muted);
+  font-weight: 750;
+  margin: 16px 0 0;
 }
 
 .lap-table-wrap {
@@ -431,6 +708,36 @@ button:disabled {
   .metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .priority-grid,
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lap-strategy,
+  .driver-panel,
+  .traffic-panel {
+    grid-column: auto;
+  }
+
+  .target-form,
+  .inline-form,
+  .issue-form,
+  .team-form,
+  .driver-controls,
+  .stop-controls,
+  .compact-stats,
+  .traffic-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .team-row {
+    grid-template-columns: 1fr;
+  }
+
+  .team-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -482,7 +789,17 @@ button:disabled {
   }
 
   .control-grid,
-  .metrics-grid {
+  .metrics-grid,
+  .target-form,
+  .inline-form,
+  .issue-form,
+  .team-form,
+  .driver-controls,
+  .stop-controls,
+  .compact-stats,
+  .traffic-counts,
+  .team-actions,
+  .issue-row {
     grid-template-columns: 1fr;
   }
 
@@ -502,5 +819,10 @@ button:disabled {
 
   .metric-card {
     min-height: 136px;
+  }
+
+  .priority-grid .metric-card__value,
+  .priority-grid .metric-card--warning .metric-card__value {
+    font-size: 1.5rem;
   }
 }
